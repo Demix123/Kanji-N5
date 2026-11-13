@@ -191,8 +191,8 @@ const KANJI = `日|Nhật|ニチ・ジツ|ひ・か|Mặt trời, ngày|4
 留|Lưu|リュウ・ル|と(める)|Giữ lại, ở lại|10
 事|Sự|ジ|こと|Việc|8`.split('\n').map(l => { const [k, hv, on, kun, m, s] = l.split('|'); return { k, hv, HV: hv.toUpperCase(), on, kun, m, s: +s }; });
 const KMAP = {}; KANJI.forEach(x => KMAP[x.k] = x);
-const TABS = [['home','Tổng quan'],['lesson','Bài học'],['kanji','Kanji'],['flash','Thẻ ghi nhớ'],['quiz','Kiểm tra'],['number','Đọc số'],['passage','Đoạn văn mẫu']];
-const DECKS = [{id:'all',label:'Tất cả'},{id:'weak',label:'Chưa thuộc'},{id:'warn',label:'⚠ Biến âm'},{id:'exam',label:'Có trong đề mẫu'}].concat(GROUPS.map(g => ({ id: g.id, label: g.title })));
+const TABS = [['home','Tổng quan'],['lesson','Đọc kanji'],['kanji','Chữ kanji'],['vocab','Từ vựng'],['grammar','Ngữ pháp'],['flash','Thẻ ghi nhớ'],['quiz','Kiểm tra'],['number','Đọc số'],['speaking','Speaking']];
+const DECKS = [{id:'all',label:'Tất cả kanji'},{id:'weak',label:'Kanji chưa thuộc'},{id:'warn',label:'⚠ Biến âm'},{id:'exam',label:'Có trong đề mẫu'}].concat(GROUPS.map(g => ({ id: g.id, label: g.title })));
 const ONE = ['','いち','に','さん','よん','ご','ろく','なな','はち','きゅう'];
 const TEN = ['','じゅう','にじゅう','さんじゅう','よんじゅう','ごじゅう','ろくじゅう','ななじゅう','はちじゅう','きゅうじゅう'];
 const HUN = ['','ひゃく','にひゃく','さんびゃく','よんひゃく','ごひゃく','ろっぴゃく','ななひゃく','はっぴゃく','きゅうひゃく'];

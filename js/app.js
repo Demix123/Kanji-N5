@@ -1,5 +1,7 @@
-// Kanji JPD113 — app state, rendering and interactions.
-// Depends on globals from data.js (GROUPS, WORDS, KANJI, KMAP, TABS, DECKS, genNum, shuffle, norm, clean).
+// Demix · JPD113 — app state, rendering and interactions.
+// Depends on globals from data.js (GROUPS, WORDS, KANJI, KMAP, TABS, DECKS, genNum, shuffle, norm, clean),
+// vocab.js (VOCAB, VOCAB_TYPES), grammar.js (GRAMMAR), reading.js (PASSAGES, PRACTICE_SENTENCES)
+// and speaking.js (SPEAK_KINDS, SPEAK_SETS).
 
 (() => {
   'use strict';
@@ -24,8 +26,20 @@
     qDeck: 'all', qMode: 'choice', quiz: null,
     nMode: 'price', num: genNum('price'), numShown: false,
     strokes: null,
+    // Từ vựng
+    vLesson: 1, vType: 'all', vHide: 'none', vRevealed: {},
+    // Ngữ pháp
+    gLesson: 1, gHideVi: false,
+    // Speaking
+    spMode: 'passage', psg: 1, furi: true, breaks: false, showVi: false,
+    qaKind: 'person', qaSet: 'p1', qaShow: {}, qaAll: false, qaFocus: -1,
+    recording: false, recUrl: '',
   };
   const strokeCache = {};
+  const LESSONS = [1, 2, 3];
+  const VOCAB_DECKS = LESSONS.map(l => ({ id: 'v' + l, label: 'Từ vựng bài ' + l })).concat([{ id: 'vall', label: 'Từ vựng 1–3' }]);
+  const ALL_DECKS = DECKS.concat(VOCAB_DECKS);
+  const ALL_ITEMS = WORDS.concat(VOCAB);
 
   function set(patch, opts = {}) {
     Object.assign(S, patch);
@@ -41,6 +55,14 @@
   const attr = obj => Object.entries(obj).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ');
   const pressed = on => `aria-pressed="${on ? 'true' : 'false'}"`;
   const groupById = id => GROUPS.find(g => g.id === id);
+  const deckTitle = g => { const G = groupById(g); if (G) return G.title; const d = ALL_DECKS.find(x => x.id === g); return d ? d.label : ''; };
+  // Katakana → hiragana, so typed answers match either script.
+  const toHira = s => (s || '').replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+  const same = (a, b) => toHira(clean(a)) === toHira(clean(b));
+  // {漢字|かんじ} markup: ruby() renders it (with or without furigana), plain() gives the reading for speech.
+  const ruby = (s, furi = true) => esc(s).replace(/\{([^|}]+)\|([^}]+)\}/g, (_, k, r) => furi ? `<ruby>${k}<rt>${r}</rt></ruby>` : k);
+  const plain = s => String(s).replace(/\{([^|}]+)\|([^}]+)\}/g, '$2');
+  const withBreaks = (html, on) => on ? html.replace(/　/g, '<span class="pause" aria-hidden="true">／</span>') : html;
 
   function speak(text) {
     try {
@@ -57,6 +79,8 @@
     if (id === 'weak') return WORDS.filter(w => !S.known[w.id]);
     if (id === 'warn') return WORDS.filter(w => w.warn);
     if (id === 'exam') return WORDS.filter(w => w.exam);
+    if (id === 'vall') return VOCAB;
+    if (id[0] === 'v') return VOCAB.filter(w => w.g === id);
     return WORDS.filter(w => w.g === id);
   }
 
@@ -123,7 +147,8 @@
   function startQuiz() {
     const p = pool(S.qDeck);
     const qs = shuffle(p).slice(0, Math.min(10, p.length)).map(w => {
-      const same = WORDS.filter(x => x.g === w.g && x.r !== w.r).map(x => x.r);
+      const src = w.kind === 'vocab' ? VOCAB : WORDS;
+      const same = src.filter(x => x.g === w.g && x.r !== w.r).map(x => x.r);
       const opts = [w.r];
       if (w.wrong && w.wrong !== w.r) opts.push(w.wrong);
       shuffle([...new Set(same)]).forEach(r => { if (opts.length < 4 && !opts.includes(r)) opts.push(r); });
@@ -142,7 +167,7 @@
   function submitTyped() {
     const z = S.quiz; if (!z || z.checked) return;
     const t = clean(z.typed); if (!t) return;
-    answer(t, t === clean(z.qs[z.i].w.r));
+    answer(t, same(t, z.qs[z.i].w.r));
   }
   function nextQ() {
     const z = S.quiz;
@@ -161,7 +186,7 @@
     return { kc, pct: kc / g.words.length, warn: g.words.filter(w => w.warn).length, best: S.best[g.id] != null ? S.best[g.id] + '%' : '—' };
   }
 
-  const deckChips = (cur, action) => DECKS.map(d =>
+  const deckChips = (cur, action) => ALL_DECKS.map(d =>
     `<button class="chip" ${pressed(cur === d.id)} ${attr({ action, id: d.id })}>${esc(d.label)}</button>`).join('');
 
   function viewHome() {
@@ -184,22 +209,36 @@
     return `<div class="stack home">
       <div class="hero">
         <div class="stack hero-copy">
-          <div class="eyebrow">Speaking JPD113 · Kanji bài 1–3</div>
-          <h1>Thuộc cách đọc theo nhóm, đọc trôi cả 10 đoạn văn mẫu.</h1>
-          <p>Kanji trong đề chủ yếu là thứ, giờ, tiền và ngày, lặp đi lặp lại. Học theo nhóm, không học từng chữ, và tập trung vào chỗ biến âm <span style="color:var(--warn);font-weight:700">⚠</span>. Giám khảo hay bắt lỗi nhất ở đó.</p>
+          <div class="eyebrow">JPD113 · Bài 1–3</div>
+          <h1>Kanji, từ vựng, ngữ pháp và Speaking trong một chỗ.</h1>
+          <p>Kanji trong đề chủ yếu là thứ, giờ, tiền và ngày, lặp đi lặp lại. Học theo nhóm, tập trung vào chỗ biến âm <span style="color:var(--warn);font-weight:700">⚠</span>, rồi luyện đọc đoạn văn và trả lời câu hỏi theo tranh.</p>
         </div>
         <div class="wrap" style="gap:10px">
           <button class="btn btn--primary" ${attr({ action: 'open-group', id: next.id })}>Học tiếp: ${esc(next.title)}</button>
-          <button class="btn" data-action="warn-quiz">Kiểm tra chỗ ⚠</button>
+          <button class="btn" ${attr({ action: 'go', id: 'speaking' })}>Luyện Speaking</button>
         </div>
       </div>
+      <section class="stack" style="gap:14px">
+        <h2 style="font-size:20px">Các phần học</h2>
+        <div class="section-grid">
+          ${[
+            ['lesson', '漢', 'Đọc kanji', `${WORDS.length} từ · ${GROUPS.length} nhóm`],
+            ['vocab', '語', 'Từ vựng', `${VOCAB.length} từ · ${VOCAB.filter(v => S.known[v.id]).length} đã thuộc`],
+            ['grammar', '文', 'Ngữ pháp', `${LESSONS.reduce((n, l) => n + GRAMMAR[l].length, 0)} mẫu câu`],
+            ['speaking', '話', 'Speaking', `${PASSAGES.length} đoạn văn · ${SPEAK_SETS.length} tranh`],
+          ].map(([id, k, t, sub]) => `<button class="card section-card" ${attr({ action: 'go', id })}>
+            <span class="kj section-k" aria-hidden="true">${k}</span>
+            <span class="stack" style="gap:2px"><span class="title">${t}</span><span class="muted" style="font-size:13px">${sub}</span></span>
+          </button>`).join('')}
+        </div>
+      </section>
       <div class="card overall">
-        <div style="display:flex;align-items:baseline;gap:8px"><span class="overall-pct">${Math.round(pct)}%</span><span style="font-size:14px;color:var(--muted)">đã thuộc</span></div>
+        <div style="display:flex;align-items:baseline;gap:8px"><span class="overall-pct">${Math.round(pct)}%</span><span style="font-size:14px;color:var(--muted)">kanji đã thuộc</span></div>
         <div class="bar" role="progressbar" aria-label="Tiến độ" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>
         <div style="font-size:14px;color:var(--ink-3)">${knownTotal} / ${WORDS.length} từ · ${WORDS.filter(w => w.warn).length} chỗ ⚠</div>
       </div>
       <section class="stack" style="gap:14px">
-        <h2 style="font-size:20px">Nhóm bài</h2>
+        <h2 style="font-size:20px">Nhóm kanji</h2>
         <div class="group-grid">${cards}</div>
       </section>
       <div class="tips-grid">
@@ -346,7 +385,7 @@
         const front = rev ? card.r : card.w;
         const size = rev ? (front.length > 7 ? '40px' : '56px') : (front.length <= 2 ? '120px' : front.length <= 4 ? '84px' : '56px');
         return `<div class="stack" style="width:100%;max-width:540px;gap:16px">
-          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted)"><span>Thẻ ${i + 1} / ${deck.length}</span><span>${esc(groupById(card.g).title)}</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted)"><span>Thẻ ${i + 1} / ${deck.length}</span><span>${esc(deckTitle(card.g))}</span></div>
           <button class="flip${S.fcFlip ? ' is-flipped' : ''}" data-action="fc-flip" ${pressed(S.fcFlip)} aria-label="Lật thẻ">
             <span class="flip-inner" style="display:block">
               <span class="face face--front">
@@ -355,7 +394,7 @@
                 <span style="font-size:13px;color:var(--faint)">Chạm để lật · phím cách</span>
               </span>
               <span class="face face--back">
-                <span class="kj" lang="ja" style="font-weight:700;font-size:30px;color:var(--deep-muted)">${rev ? '' : esc(card.w)}</span>
+                <span class="kj" lang="ja" style="font-weight:700;font-size:30px;color:var(--deep-muted)">${rev || card.w === card.r ? '' : esc(card.w)}</span>
                 <span class="${rev ? 'kj' : 'jp'}" lang="ja" style="font-weight:500;font-size:40px;line-height:1.2">${esc(rev ? card.w : card.r)}</span>
                 <span style="font-size:17px;color:var(--deep-text)">${esc(card.m)}</span>
                 <span style="font-size:14px;color:#e8b9a2;max-width:380px">${esc(card.note)}</span>
@@ -381,7 +420,7 @@
       const modes = [['choice', 'Chọn đáp án'], ['type', 'Gõ hiragana']].map(([id, label]) =>
         `<button ${pressed(S.qMode === id)} ${attr({ action: 'q-mode', id })}>${label}</button>`).join('');
       return `<div class="stack narrow"><div class="stack" style="gap:22px">
-        <div><h2 style="margin-bottom:6px;font-size:26px">Kiểm tra cách đọc</h2><p style="color:var(--ink-3);font-size:15px">10 câu mỗi lượt. Nhìn kanji, chọn hoặc gõ cách đọc bằng hiragana.</p></div>
+        <div><h2 style="margin-bottom:6px;font-size:26px">Kiểm tra</h2><p style="color:var(--ink-3);font-size:15px">10 câu mỗi lượt. Bộ kanji: nhìn chữ, chọn hoặc gõ cách đọc. Bộ từ vựng: nhìn nghĩa tiếng Việt, chọn hoặc gõ từ tiếng Nhật.</p></div>
         <div class="stack" style="gap:10px"><span class="label">Bộ câu hỏi</span><div class="wrap" style="gap:6px">${deckChips(S.qDeck, 'q-deck')}</div></div>
         <div class="stack" style="gap:10px"><span class="label">Cách trả lời</span><div class="segmented">${modes}</div></div>
         <div class="wrap" style="align-items:center;gap:16px">
@@ -420,7 +459,7 @@
         }).join('')}</div>`
       : `<div style="display:flex;gap:8px">
           <label class="sr-only" for="q-type">Cách đọc</label>
-          <input id="q-type" class="input jp" lang="ja" value="${esc(z.typed)}" placeholder="Gõ hiragana, vd: くじ" autocomplete="off" ${z.checked ? 'readonly' : ''}
+          <input id="q-type" class="input jp" lang="ja" value="${esc(z.typed)}" placeholder="${w.kind === 'vocab' ? 'Gõ hiragana/katakana' : 'Gõ hiragana, vd: くじ'}" autocomplete="off" ${z.checked ? 'readonly' : ''}
             style="height:54px;padding:0 16px;border-width:1.5px;border-radius:12px;font-weight:500;font-size:20px">
           <button class="btn btn--dark" style="height:54px;border-radius:12px" data-action="q-submit">Kiểm tra</button>
         </div>`;
@@ -442,11 +481,15 @@
         <div class="bar" style="flex:1"><span style="width:${prog}%;background:var(--ink)"></span></div>
         <button class="link-btn" data-action="q-quit">Thoát</button>
       </div>
-      <div class="card prompt">
+      ${w.kind === 'vocab' ? `<div class="card prompt">
+        <span class="muted" style="font-size:13px">Từ này tiếng Nhật là gì?</span>
+        <span style="font-weight:700;font-size:clamp(28px,6vw,44px);line-height:1.25;text-align:center">${esc(w.m)}</span>
+        <span class="muted" style="font-size:14px">${esc(VOCAB_TYPES[w.t] || '')}</span>
+      </div>` : `<div class="card prompt">
         <span class="muted" style="font-size:13px">Đọc từ này thế nào?</span>
         <span class="kj" lang="ja" style="font-weight:700;font-size:clamp(48px,10vw,76px);line-height:1.2;text-align:center">${esc(w.w)}</span>
         <span class="muted" style="font-size:14px">${esc(w.m)}</span>
-      </div>
+      </div>`}
       ${answerUi}${feedback}
     </div></div>`;
   }
@@ -480,14 +523,215 @@
     </div>`;
   }
 
-  function viewPassage() {
-    return `<div class="stack" style="max-width:640px;margin:40px auto;text-align:center;align-items:center;gap:14px">
-      <div aria-hidden="true" class="kj" style="width:64px;height:64px;border-radius:14px;background:var(--track);display:grid;place-items:center;font-weight:700;font-size:30px;color:var(--muted)">読</div>
-      <h2 style="font-size:24px">10 đoạn văn mẫu</h2>
-      <p style="color:var(--ink-3);font-size:15px;line-height:1.65;text-wrap:pretty">Luyện đọc to từng đoạn: bật/tắt furigana, đánh dấu ngắt hơi, nghe mẫu từng câu, và ẩn dần furigana như cách tẩy bút chì.</p>
-      <span style="font-size:13px;color:var(--faint);border:1px dashed var(--dashed);padding:6px 12px;border-radius:8px">Nội dung đoạn văn đang được bổ sung</span>
+  const lessonChips = (cur, action) => LESSONS.map(l =>
+    `<button class="chip" ${pressed(cur === l)} ${attr({ action, id: l })}>Bài ${l}</button>`).join('');
+
+  // ---------- Từ vựng ----------
+  function viewVocab() {
+    const list = VOCAB.filter(v => v.lesson === S.vLesson && (S.vType === 'all' || v.t === S.vType));
+    const all = VOCAB.filter(v => v.lesson === S.vLesson);
+    const kc = all.filter(v => S.known[v.id]).length;
+    const types = [['all', 'Tất cả']].concat(Object.entries(VOCAB_TYPES).filter(([t]) => all.some(v => v.t === t)));
+    const hideModes = [['none', 'Hiện hết'], ['jp', 'Ẩn tiếng Nhật'], ['vi', 'Ẩn nghĩa']];
+    const rows = list.map(v => {
+      const kn = !!S.known[v.id];
+      const open = S.vRevealed[v.id];
+      const hideJp = S.vHide === 'jp' && !open, hideVi = S.vHide === 'vi' && !open;
+      const reveal = `<button class="reveal" ${attr({ action: 'v-reveal', id: v.id })}>Chạm để xem</button>`;
+      return `<div class="word-row">
+        <div class="stack" style="flex:1 1 200px;gap:2px;min-width:0">
+          ${hideJp ? reveal : `<span class="jp" lang="ja" style="font-weight:700;font-size:21px">${esc(v.r)}</span>
+          ${v.kj ? `<span class="kj" lang="ja" style="font-size:15px;color:var(--muted)">${esc(v.kj)}</span>` : ''}`}
+        </div>
+        <div class="stack" style="flex:2 1 200px;gap:2px;min-width:0">
+          ${hideVi ? reveal : `<span style="font-size:15px">${esc(v.m)}</span>`}
+          <span style="font-size:12px;color:var(--muted)">${esc(VOCAB_TYPES[v.t] || '')}${v.note ? ' · ' + esc(v.note) : ''}</span>
+        </div>
+        <div style="flex:none;display:flex;gap:6px">
+          <button class="btn btn--icon" title="Nghe" aria-label="Nghe ${esc(v.r)}" ${attr({ action: 'speak', text: v.r })}>▶</button>
+          <button class="known-btn" ${pressed(kn)} ${attr({ action: 'toggle-known', id: v.id })}>${kn ? '✓ Đã thuộc' : 'Đánh dấu thuộc'}</button>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="stack" style="gap:20px">
+      <div class="wrap" style="gap:16px;align-items:flex-end;justify-content:space-between">
+        <div class="stack" style="gap:6px">
+          <h2 style="font-size:clamp(24px,3vw,32px)">Từ vựng bài ${S.vLesson}</h2>
+          <span class="muted" style="font-size:14px">${all.length} từ · đã thuộc ${kc}</span>
+        </div>
+        <div class="wrap" style="gap:8px">
+          <button class="btn btn--md" data-action="vocab-flash">Luyện thẻ bài này</button>
+          <button class="btn btn--md btn--primary" data-action="vocab-quiz">Kiểm tra bài này</button>
+        </div>
+      </div>
+      <div class="chip-row">${lessonChips(S.vLesson, 'v-lesson')}</div>
+      <div class="wrap" style="gap:12px;align-items:center;justify-content:space-between">
+        <div class="wrap" style="gap:6px">${types.map(([id, label]) => `<button class="chip chip--square" ${pressed(S.vType === id)} ${attr({ action: 'v-type', id })}>${esc(label)}</button>`).join('')}</div>
+        <div class="segmented">${hideModes.map(([id, label]) => `<button ${pressed(S.vHide === id)} ${attr({ action: 'v-hide', id })}>${label}</button>`).join('')}</div>
+      </div>
+      <div class="list">${rows}</div>
     </div>`;
   }
+
+  // ---------- Ngữ pháp ----------
+  function viewGrammar() {
+    const pts = GRAMMAR[S.gLesson] || [];
+    const cards = pts.map((g, i) => `<article class="card grammar">
+      <div class="wrap" style="gap:10px;align-items:baseline">
+        <span class="g-num">${i + 1}</span>
+        <h3 class="jp" lang="ja">${esc(g.p)}</h3>
+      </div>
+      <p class="g-mean">${esc(g.m)}</p>
+      ${g.n ? `<p class="note-box" style="font-size:14px">${esc(g.n)}</p>` : ''}
+      <ul class="g-ex">${g.ex.map(([jp, vi]) => `<li>
+        <button class="btn btn--icon" title="Nghe" aria-label="Nghe ví dụ" ${attr({ action: 'speak', text: jp })}>▶</button>
+        <span class="stack" style="gap:2px;min-width:0">
+          <span class="jp" lang="ja" style="font-size:17px">${esc(jp)}</span>
+          ${S.gHideVi ? '' : `<span class="muted" style="font-size:14px">${esc(vi)}</span>`}
+        </span></li>`).join('')}</ul>
+    </article>`).join('');
+    return `<div class="stack" style="gap:20px;max-width:860px">
+      <div class="wrap" style="gap:16px;align-items:flex-end;justify-content:space-between">
+        <div class="stack" style="gap:6px">
+          <h2 style="font-size:clamp(24px,3vw,32px)">Ngữ pháp bài ${S.gLesson}</h2>
+          <span class="muted" style="font-size:14px">${pts.length} mẫu câu · theo file tóm tắt ngữ pháp</span>
+        </div>
+        <button class="chip chip--square" ${pressed(S.gHideVi)} data-action="g-hide">Ẩn nghĩa ví dụ (tự dịch)</button>
+      </div>
+      <div class="chip-row">${lessonChips(S.gLesson, 'g-lesson')}</div>
+      <div class="stack" style="gap:14px">${cards}</div>
+    </div>`;
+  }
+
+  // ---------- Speaking ----------
+  function recorderUi() {
+    return `<div class="wrap rec" style="gap:10px;align-items:center">
+      <button class="btn btn--md${S.recording ? ' btn--rec' : ''}" data-action="rec">${S.recording ? '■ Dừng ghi âm' : '● Ghi âm mình đọc'}</button>
+      ${S.recUrl && !S.recording ? `<audio controls src="${S.recUrl}" style="height:40px;max-width:100%"></audio>` : ''}
+    </div>`;
+  }
+
+  function viewPassages() {
+    const P = PASSAGES.find(p => p.n === S.psg);
+    const picker = PASSAGES.map(p => `<button class="chip" ${pressed(S.psg === p.n)} ${attr({ action: 'psg', id: p.n })}>Đoạn ${p.n}</button>`).join('');
+    const lines = P.s.map((s, i) => `<li>
+      <button class="btn btn--icon" title="Nghe câu này" aria-label="Nghe câu ${i + 1}" ${attr({ action: 'speak', text: plain(s) })}>▶</button>
+      <span class="jp passage-line" lang="ja">${withBreaks(ruby(s, S.furi), S.breaks)}</span></li>`).join('');
+    return `<div class="stack" style="gap:18px">
+      <div class="chip-row">${picker}</div>
+      <div class="wrap" style="gap:12px;align-items:flex-end;justify-content:space-between">
+        <div class="stack" style="gap:4px"><span class="label">No.${P.n}</span><h3 style="font-size:22px">${esc(P.title)}</h3></div>
+        <div class="wrap" style="gap:6px">
+          <button class="chip chip--square" ${pressed(S.furi)} data-action="sp-furi">Furigana</button>
+          <button class="chip chip--square" ${pressed(S.breaks)} data-action="sp-breaks">Ngắt hơi ／</button>
+          <button class="chip chip--square" ${pressed(S.showVi)} data-action="sp-vi">Bản dịch</button>
+        </div>
+      </div>
+      <div class="card passage"><ol>${lines}</ol></div>
+      ${S.showVi ? `<p class="note-box" style="color:var(--ink-3)">${esc(P.vi)}</p>` : ''}
+      <div class="wrap" style="gap:10px;align-items:center">
+        <button class="btn btn--md btn--primary" ${attr({ action: 'speak', text: P.s.map(plain).join('') })}>▶ Nghe cả đoạn</button>
+        ${recorderUi()}
+      </div>
+      <p class="muted" style="font-size:13px">Cách luyện: đọc với furigana 2–3 lần, rồi tắt furigana và đọc lại. Ghi âm, nghe lại chỗ nào bị khựng.</p>
+    </div>`;
+  }
+
+  function viewSentences() {
+    const rows = PRACTICE_SENTENCES.map(([s, vi], i) => `<li>
+      <span class="g-num">${i + 1}</span>
+      <button class="btn btn--icon" title="Nghe" aria-label="Nghe câu ${i + 1}" ${attr({ action: 'speak', text: plain(s) })}>▶</button>
+      <span class="stack" style="gap:2px;min-width:0">
+        <span class="jp passage-line" lang="ja">${ruby(s, S.furi)}</span>
+        ${S.showVi ? `<span class="muted" style="font-size:14px">${esc(vi)}</span>` : ''}
+      </span></li>`).join('');
+    return `<div class="stack" style="gap:18px">
+      <div class="wrap" style="gap:12px;align-items:flex-end;justify-content:space-between">
+        <p style="color:var(--ink-3);font-size:15px;max-width:560px">Đi thi sẽ đọc đoạn văn, nhưng luyện thêm 15 câu này để nhớ mặt chữ số, tiền và ngày.</p>
+        <div class="wrap" style="gap:6px">
+          <button class="chip chip--square" ${pressed(S.furi)} data-action="sp-furi">Furigana</button>
+          <button class="chip chip--square" ${pressed(S.showVi)} data-action="sp-vi">Bản dịch</button>
+        </div>
+      </div>
+      <div class="card passage"><ol class="numbered">${rows}</ol></div>
+    </div>`;
+  }
+
+  function viewQA() {
+    const kindSets = SPEAK_SETS.filter(s => s.kind === S.qaKind);
+    const set = SPEAK_SETS.find(s => s.id === S.qaSet) || kindSets[0];
+    const kind = SPEAK_KINDS.find(k => k.id === S.qaKind);
+    const qa = set.qa.map(([q, a, tip], i) => {
+      const open = S.qaAll || S.qaShow[i];
+      return `<li class="${S.qaFocus === i ? 'is-focus' : ''}">
+        <div class="wrap" style="gap:8px;align-items:center">
+          <span class="g-num">${i + 1}</span>
+          <button class="btn btn--icon" title="Nghe câu hỏi" aria-label="Nghe câu hỏi ${i + 1}" ${attr({ action: 'speak', text: plain(q) })}>▶</button>
+          <span class="jp" lang="ja" style="font-size:18px;flex:1 1 220px">${ruby(q)}</span>
+        </div>
+        ${open ? `<div class="answer">
+          <button class="ghost-round" style="width:36px;height:36px" title="Nghe câu trả lời" aria-label="Nghe câu trả lời" ${attr({ action: 'speak', text: plain(a) })}>▶</button>
+          <span class="stack" style="gap:2px"><span class="jp" lang="ja" style="font-size:18px;font-weight:500">${ruby(a)}</span>
+          ${tip ? `<span style="font-size:13px;color:var(--warn)">${esc(tip)}</span>` : ''}</span>
+        </div>` : `<button class="reveal" style="margin-left:44px" ${attr({ action: 'qa-show', id: i })}>Tự trả lời trước, rồi chạm để xem đáp án</button>`}
+      </li>`;
+    }).join('');
+    return `<div class="stack" style="gap:18px">
+      <div class="segmented" style="flex-wrap:wrap">${SPEAK_KINDS.map(k => `<button ${pressed(S.qaKind === k.id)} ${attr({ action: 'qa-kind', id: k.id })}>${esc(k.label)}</button>`).join('')}</div>
+      <p class="muted" style="font-size:14px">${esc(kind.hint)}</p>
+      <div class="chip-row">${kindSets.map(s => `<button class="chip" ${pressed(set.id === s.id)} ${attr({ action: 'qa-set', id: s.id })}><span lang="ja">${esc(s.title)}</span></button>`).join('')}</div>
+      <div class="qa-layout">
+        <figure class="card pic">
+          <div class="pic-emoji" aria-hidden="true">${set.pic}</div>
+          <figcaption class="pic-info">
+            <span class="jp" lang="ja" style="font-weight:700;font-size:20px">${esc(set.title)}</span>
+            ${set.info.map(t => `<span lang="ja">${esc(t)}</span>`).join('')}
+          </figcaption>
+        </figure>
+        <div class="stack" style="gap:12px;min-width:0">
+          <div class="wrap" style="gap:8px">
+            <button class="btn btn--md btn--primary" data-action="qa-random">🎲 Câu hỏi ngẫu nhiên</button>
+            <button class="btn btn--md" data-action="qa-all">${S.qaAll ? 'Ẩn đáp án' : 'Hiện tất cả đáp án'}</button>
+          </div>
+          <ol class="card qa-list">${qa}</ol>
+        </div>
+      </div>
+      ${recorderUi()}
+    </div>`;
+  }
+
+  function viewSpeaking() {
+    const modes = [['passage', 'Đọc đoạn văn'], ['sentences', '15 câu luyện đọc'], ['qa', 'Hỏi đáp theo tranh']];
+    const body = S.spMode === 'passage' ? viewPassages() : S.spMode === 'sentences' ? viewSentences() : viewQA();
+    return `<div class="stack" style="gap:20px">
+      <div class="stack" style="gap:6px">
+        <h2 style="font-size:clamp(24px,3vw,32px)">Luyện thi Speaking</h2>
+        <p style="color:var(--ink-3);font-size:15px">Phần 1 đọc đoạn văn, phần 2 trả lời câu hỏi theo tranh. Bấm ▶ để nghe mẫu.</p>
+      </div>
+      <div class="segmented">${modes.map(([id, label]) => `<button ${pressed(S.spMode === id)} ${attr({ action: 'sp-mode', id })}>${label}</button>`).join('')}</div>
+      ${body}
+    </div>`;
+  }
+
+  // ---------- Recorder ----------
+  let mediaRec = null;
+  function toggleRec() {
+    if (S.recording && mediaRec) { mediaRec.stop(); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) { alert('Trình duyệt này không hỗ trợ ghi âm.'); return; }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      const chunks = [];
+      mediaRec = new MediaRecorder(stream);
+      mediaRec.ondataavailable = e => chunks.push(e.data);
+      mediaRec.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (S.recUrl) URL.revokeObjectURL(S.recUrl);
+        set({ recording: false, recUrl: URL.createObjectURL(new Blob(chunks, { type: mediaRec.mimeType })) });
+      };
+      mediaRec.start();
+      set({ recording: true });
+    }).catch(() => alert('Không mở được micro. Hãy cho phép trình duyệt dùng micro.'));
+  }
+  function clearRec() { if (S.recording && mediaRec) mediaRec.stop(); if (S.recUrl) URL.revokeObjectURL(S.recUrl); S.recUrl = ''; }
 
   function viewSearch(qt) {
     const nq = norm(qt);
@@ -503,22 +747,31 @@
       <span style="flex:1;font-size:14px;color:var(--ink-3)">${esc(w.m)}</span>
       <span class="muted" style="font-size:12px">${esc(groupById(w.g).title)} →</span>
     </button>`).join('');
+    const htq = toHira(qt);
+    const vocab = VOCAB.filter(v => toHira(v.r).includes(htq) || (v.kj && v.kj.includes(qt)) || norm(v.m).includes(nq)).slice(0, 30);
+    const vHtml = vocab.map(v => `<button class="word-row word-row--link" ${attr({ action: 'open-vocab', id: v.lesson })}>
+      <span class="jp" lang="ja" style="font-weight:700;font-size:20px;min-width:140px">${esc(v.r)}</span>
+      <span class="kj" lang="ja" style="font-size:17px;min-width:100px;color:var(--muted)">${esc(v.kj)}</span>
+      <span style="flex:1;font-size:14px;color:var(--ink-3)">${esc(v.m)}</span>
+      <span class="muted" style="font-size:12px">Từ vựng bài ${v.lesson} →</span>
+    </button>`).join('');
     return `<div class="stack" style="gap:24px">
       <h2 style="font-size:22px">Kết quả cho “${esc(qt)}”</h2>
-      ${!words.length && !kanji.length ? '<p class="muted">Không tìm thấy. Thử gõ Hán Việt không dấu (vd: “nhat”), hiragana hoặc nghĩa tiếng Việt.</p>' : ''}
+      ${!words.length && !kanji.length && !vocab.length ? '<p class="muted">Không tìm thấy. Thử gõ Hán Việt không dấu (vd: “nhat”), hiragana hoặc nghĩa tiếng Việt.</p>' : ''}
+      ${vocab.length ? `<div class="stack" style="gap:10px"><div class="label">Từ vựng bài 1–3</div><div class="list">${vHtml}</div></div>` : ''}
       ${kanji.length ? `<div class="stack" style="gap:10px"><div class="label">Kanji</div><div class="wrap" style="gap:10px">${kHtml}</div></div>` : ''}
-      ${words.length ? `<div class="stack" style="gap:10px"><div class="label">Từ vựng</div><div class="list">${wHtml}</div></div>` : ''}
+      ${words.length ? `<div class="stack" style="gap:10px"><div class="label">Từ có kanji</div><div class="list">${wHtml}</div></div>` : ''}
     </div>`;
   }
 
   // ---------- Render ----------
-  const VIEWS = { home: viewHome, lesson: viewLesson, kanji: viewKanji, flash: viewFlash, quiz: viewQuiz, number: viewNumber, passage: viewPassage };
+  const VIEWS = { home: viewHome, lesson: viewLesson, kanji: viewKanji, vocab: viewVocab, grammar: viewGrammar, flash: viewFlash, quiz: viewQuiz, number: viewNumber, speaking: viewSpeaking };
 
   function render() {
     const qt = S.q.trim();
-    const knownTotal = WORDS.filter(w => S.known[w.id]).length;
+    const knownTotal = ALL_ITEMS.filter(w => S.known[w.id]).length;
     $('#known-total').textContent = knownTotal;
-    $('#known-of').textContent = `/ ${WORDS.length} từ đã thuộc`;
+    $('#known-of').textContent = `/ ${ALL_ITEMS.length} từ đã thuộc`;
     $('#q-clear').hidden = !qt;
     $('#tabs').innerHTML = TABS.map(([id, label]) =>
       `<button class="tab" ${attr({ action: 'go', id })} ${S.screen === id && !qt ? 'aria-current="page"' : ''}>${label}</button>`).join('');
@@ -559,6 +812,35 @@
     'n-mode': d => set({ nMode: d.id, num: genNum(d.id), numShown: false }),
     'n-reveal': () => set({ numShown: !S.numShown }),
     'n-next': () => set({ num: genNum(S.nMode), numShown: false }),
+    // Từ vựng
+    'open-vocab': d => { $('#q').value = ''; set({ screen: 'vocab', vLesson: +d.id, q: '', vRevealed: {} }); window.scrollTo(0, 0); },
+    'v-lesson': d => set({ vLesson: +d.id, vType: 'all', vRevealed: {} }),
+    'v-type': d => set({ vType: d.id }),
+    'v-hide': d => set({ vHide: d.id, vRevealed: {} }),
+    'v-reveal': d => set({ vRevealed: { ...S.vRevealed, [d.id]: true } }),
+    'vocab-flash': () => set({ screen: 'flash', fcDeck: 'v' + S.vLesson, fcIdx: 0, fcFlip: false }),
+    'vocab-quiz': () => { set({ screen: 'quiz', qDeck: 'v' + S.vLesson }); startQuiz(); },
+    // Ngữ pháp
+    'g-lesson': d => set({ gLesson: +d.id }),
+    'g-hide': () => set({ gHideVi: !S.gHideVi }),
+    // Speaking
+    'sp-mode': d => { clearRec(); set({ spMode: d.id }); },
+    'psg': d => { clearRec(); set({ psg: +d.id }); },
+    'sp-furi': () => set({ furi: !S.furi }),
+    'sp-breaks': () => set({ breaks: !S.breaks }),
+    'sp-vi': () => set({ showVi: !S.showVi }),
+    'qa-kind': d => { const first = SPEAK_SETS.find(s => s.kind === d.id); set({ qaKind: d.id, qaSet: first.id, qaShow: {}, qaAll: false, qaFocus: -1 }); },
+    'qa-set': d => set({ qaSet: d.id, qaShow: {}, qaAll: false, qaFocus: -1 }),
+    'qa-show': d => set({ qaShow: { ...S.qaShow, [d.id]: true } }),
+    'qa-all': () => set({ qaAll: !S.qaAll, qaShow: {} }),
+    'qa-random': () => {
+      const s = SPEAK_SETS[Math.floor(Math.random() * SPEAK_SETS.length)];
+      const i = Math.floor(Math.random() * s.qa.length);
+      set({ qaKind: s.kind, qaSet: s.id, qaShow: {}, qaAll: false, qaFocus: i });
+      speak(plain(s.qa[i][0]));
+      document.querySelector('.qa-list li.is-focus')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    },
+    'rec': () => toggleRec(),
   };
 
   document.addEventListener('click', e => {
