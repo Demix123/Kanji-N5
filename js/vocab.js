@@ -179,12 +179,43 @@ const VOCAB_RAW = {
 };
 
 const VOCAB_TYPES = { n: 'Danh từ', v: 'Động từ', a: 'Tính từ', x: 'Khác' };
+
+// Nhóm chủ đề để ôn theo nhóm. Each group: [id, label, kana list separated by spaces].
+// '@v' means every verb of the lesson. Every word must be in exactly one group.
+const VOCAB_TOPICS = {
+  1: [
+    ['country', 'Quốc gia & người', 'にほん かんこく ちゅうごく タイ ベトナム オーストラリア アメリカ イタリア ロシア インド ブラジル くに 〜じん'],
+    ['job', 'Nghề nghiệp & trường', 'しごと きょうし かいしゃいん がくせい せんせい だいがく こうこう にほんごがっこう'],
+    ['hobby', 'Sở thích', 'しゅみ スポーツ テニス すいえい サッカー えいが どくしょ おんがく りょこう りょうり'],
+    ['self', 'Giới thiệu bản thân', 'なまえ たんじょうび 〜さい'],
+  ],
+  2: [
+    ['floor', 'Chỗ trong cửa hàng', 'インフォメーション エーティーエム エスカレーター エレベーター トイレ レジ きつえんじょ ちか'],
+    ['shop', 'Cửa hàng & nhân viên', 'スーパー ひゃくえんショップ レストラン きっさてん 〜や てんいん'],
+    ['thing', 'Đồ vật', 'カメラ けいたいでんわ じしょ でんしじしょ パソコン くつ けしゴム ペン トイレットペーパー ほん かばん ズボン ティーシャツ とけい さいふ'],
+    ['food', 'Thực phẩm', 'あぶら ケーキ こめ たまご パン みず イチゴ リンゴ バナナ えび さかな ぶたにく とりにく ぎゅうにく やさい'],
+    ['menu', 'Món ăn & đồ uống', 'りょうり カレー スープ おやこどん とんかつ ハンバーグ ごはん ライス （お）ちゃ こうちゃ コーヒー ジュース ビール ワイン'],
+    ['country', 'Nước & ngôn ngữ', 'ドイツ フランス えいご'],
+  ],
+  3: [
+    ['verb', 'Động từ', '@v'],
+    ['day', 'Thứ trong tuần', '〜ようび にちようび げつようび かようび すいようび もくようび きんようび どようび'],
+    ['time', 'Thời gian trong ngày', 'ごぜん ごご あさ ひる よる ばん じかん まいにち いちねん'],
+    ['season', 'Mùa, lễ hội & sự kiện', 'はる なつ あき ふゆ なつやすみ ゴールデンウイーク さくら おはなみ はなび おまつり パーティー バーベキュー スキー ホームステイ'],
+    ['place', 'Địa điểm', 'ぎんこう たいいくかん としょかん びょういん ゆうびんきょく きょうしつ うみ こうえん うち コンビニ かいしゃ がっこう'],
+    ['school', 'Học tập & công việc', 'じゅぎょう テスト やすみ スケジュール アルバイト りゅうがくせい'],
+    ['food', 'Đồ ăn & đồ uống', 'あさごはん ひるごはん ばんごはん おべんとう おすし おさけ ぎゅうにゅう くだもの サラダ チーズ'],
+    ['media', 'Đồ vật & phương tiện', 'バス インターネット しんぶん テレビ シーディー ディーブイディー'],
+  ],
+};
 // Parsed list. Each item works like a kanji word (w, r, m, g, id) so flashcards and the quiz can use it.
 // Vocab is studied by its kana only: w = kana. kj is kept so a search for 日本 still finds にほん.
 const VOCAB = [];
 Object.entries(VOCAB_RAW).forEach(([lesson, raw]) => {
   raw.trim().split('\n').forEach((line, i) => {
     const [kana, kanji = '', m = '', t = 'x', note = ''] = line.split('|');
-    VOCAB.push({ id: `v${lesson}-${i}`, g: `v${lesson}`, lesson: +lesson, kind: 'vocab', r: kana, kj: kanji, w: kana, m, t, note, warn: false, exam: false });
+    const tp = (VOCAB_TOPICS[lesson] || []).find(([, , list]) => list === '@' + t || list.split(' ').includes(kana));
+    if (!tp) console.warn('Từ chưa có nhóm:', lesson, kana);
+    VOCAB.push({ id: `v${lesson}-${i}`, g: `v${lesson}`, lesson: +lesson, kind: 'vocab', r: kana, kj: kanji, w: kana, m, t, note, topic: tp ? tp[0] : '', warn: false, exam: false });
   });
 });

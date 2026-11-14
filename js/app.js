@@ -27,7 +27,7 @@
     nMode: 'price', num: genNum('price'), numShown: false,
     strokes: null,
     // Từ vựng
-    vLesson: 1, vType: 'all', vHide: 'none', vRevealed: {},
+    vLesson: 1, vTopic: 'all', vHide: 'none', vRevealed: {},
     // Ngữ pháp
     gLesson: 1, gHideVi: false,
     // Speaking
@@ -40,6 +40,8 @@
   const VOCAB_DECKS = LESSONS.map(l => ({ id: 'v' + l, label: 'Từ vựng bài ' + l })).concat([{ id: 'vall', label: 'Từ vựng 1–3' }]);
   const ALL_DECKS = DECKS.concat(VOCAB_DECKS);
   const ALL_ITEMS = WORDS.concat(VOCAB);
+  // Deck for the vocab page's current lesson and group.
+  const vocabDeck = () => 'v' + S.vLesson + (S.vTopic === 'all' ? '' : ':' + S.vTopic);
 
   function set(patch, opts = {}) {
     Object.assign(S, patch);
@@ -55,7 +57,9 @@
   const attr = obj => Object.entries(obj).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ');
   const pressed = on => `aria-pressed="${on ? 'true' : 'false'}"`;
   const groupById = id => GROUPS.find(g => g.id === id);
-  const deckTitle = g => { const G = groupById(g); if (G) return G.title; const d = ALL_DECKS.find(x => x.id === g); return d ? d.label : ''; };
+  // Topic decks look like 'v3:day' (lesson 3, group "day" in VOCAB_TOPICS).
+  const topicOf = id => { const [g, t] = String(id).split(':'); const tp = t && (VOCAB_TOPICS[g.slice(1)] || []).find(x => x[0] === t); return tp ? { g, t, lesson: g.slice(1), label: tp[1] } : null; };
+  const deckTitle = g => { const G = groupById(g); if (G) return G.title; const tp = topicOf(g); if (tp) return `Bài ${tp.lesson} · ${tp.label}`; const d = ALL_DECKS.find(x => x.id === g); return d ? d.label : ''; };
   // Katakana → hiragana, so typed answers match either script.
   const toHira = s => (s || '').replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
   const same = (a, b) => toHira(clean(a)) === toHira(clean(b));
@@ -80,6 +84,8 @@
     if (id === 'warn') return WORDS.filter(w => w.warn);
     if (id === 'exam') return WORDS.filter(w => w.exam);
     if (id === 'vall') return VOCAB;
+    const tp = topicOf(id);
+    if (tp) return VOCAB.filter(w => w.g === tp.g && w.topic === tp.t);
     if (id[0] === 'v') return VOCAB.filter(w => w.g === id);
     return WORDS.filter(w => w.g === id);
   }
@@ -148,10 +154,12 @@
     const p = pool(S.qDeck);
     const qs = shuffle(p).slice(0, Math.min(10, p.length)).map(w => {
       const src = w.kind === 'vocab' ? VOCAB : WORDS;
-      const same = src.filter(x => x.g === w.g && x.r !== w.r).map(x => x.r);
+      const same = src.filter(x => x.g === w.g && x.r !== w.r);
       const opts = [w.r];
       if (w.wrong && w.wrong !== w.r) opts.push(w.wrong);
-      shuffle([...new Set(same)]).forEach(r => { if (opts.length < 4 && !opts.includes(r)) opts.push(r); });
+      // Vocab: wrong options come from the same topic first (verbs vs verbs), then the rest of the lesson.
+      const near = w.topic ? shuffle(same.filter(x => x.topic === w.topic)) : [];
+      [...near, ...shuffle(same)].forEach(x => { if (opts.length < 4 && !opts.includes(x.r)) opts.push(x.r); });
       return { w, opts: shuffle(opts) };
     });
     set({ quiz: { deck: S.qDeck, mode: S.qMode, qs, i: 0, checked: false, picked: null, typed: '', ok: false, wrong: [], score: 0, done: false } });
@@ -186,7 +194,8 @@
     return { kc, pct: kc / g.words.length, warn: g.words.filter(w => w.warn).length, best: S.best[g.id] != null ? S.best[g.id] + '%' : '—' };
   }
 
-  const deckChips = (cur, action) => ALL_DECKS.map(d =>
+  // A topic deck chosen from the vocab page gets its own chip so it shows as selected.
+  const deckChips = (cur, action) => ALL_DECKS.concat(topicOf(cur) ? [{ id: cur, label: deckTitle(cur) }] : []).map(d =>
     `<button class="chip" ${pressed(cur === d.id)} ${attr({ action, id: d.id })}>${esc(d.label)}</button>`).join('');
 
   function viewHome() {
@@ -528,10 +537,12 @@
 
   // ---------- Từ vựng ----------
   function viewVocab() {
-    const list = VOCAB.filter(v => v.lesson === S.vLesson && (S.vType === 'all' || v.t === S.vType));
     const all = VOCAB.filter(v => v.lesson === S.vLesson);
+    const list = S.vTopic === 'all' ? all : all.filter(v => v.topic === S.vTopic);
     const kc = all.filter(v => S.known[v.id]).length;
-    const types = [['all', 'Tất cả']].concat(Object.entries(VOCAB_TYPES).filter(([t]) => all.some(v => v.t === t)));
+    const topics = [['all', 'Tất cả', all.length]].concat((VOCAB_TOPICS[S.vLesson] || []).map(([id, label]) => [id, label, all.filter(v => v.topic === id).length]));
+    const topicLabel = S.vTopic === 'all' ? '' : (topics.find(t => t[0] === S.vTopic) || [])[1] || '';
+    const scope = S.vTopic === 'all' ? 'bài này' : 'nhóm này';
     const hideModes = [['none', 'Hiện hết'], ['jp', 'Ẩn tiếng Nhật'], ['vi', 'Ẩn nghĩa']];
     const rows = list.map(v => {
       const kn = !!S.known[v.id];
@@ -555,17 +566,20 @@
     return `<div class="stack" style="gap:20px">
       <div class="wrap" style="gap:16px;align-items:flex-end;justify-content:space-between">
         <div class="stack" style="gap:6px">
-          <h2 style="font-size:clamp(24px,3vw,32px)">Từ vựng bài ${S.vLesson}</h2>
-          <span class="muted" style="font-size:14px">${all.length} từ · đã thuộc ${kc}</span>
+          <h2 style="font-size:clamp(24px,3vw,32px)">Từ vựng bài ${S.vLesson}${topicLabel ? ` · ${esc(topicLabel)}` : ''}</h2>
+          <span class="muted" style="font-size:14px">${topicLabel ? `${list.length} từ trong nhóm · đã thuộc ${list.filter(v => S.known[v.id]).length}` : `${all.length} từ · đã thuộc ${kc}`}</span>
         </div>
         <div class="wrap" style="gap:8px">
-          <button class="btn btn--md" data-action="vocab-flash">Luyện thẻ bài này</button>
-          <button class="btn btn--md btn--primary" data-action="vocab-quiz">Kiểm tra bài này</button>
+          <button class="btn btn--md" data-action="vocab-flash">Luyện thẻ ${scope}</button>
+          <button class="btn btn--md btn--primary" data-action="vocab-quiz">Kiểm tra ${scope}</button>
         </div>
       </div>
       <div class="chip-row">${lessonChips(S.vLesson, 'v-lesson')}</div>
-      <div class="wrap" style="gap:12px;align-items:center;justify-content:space-between">
-        <div class="wrap" style="gap:6px">${types.map(([id, label]) => `<button class="chip chip--square" ${pressed(S.vType === id)} ${attr({ action: 'v-type', id })}>${esc(label)}</button>`).join('')}</div>
+      <div class="stack" style="gap:8px">
+        <span class="label">Ôn theo nhóm</span>
+        <div class="wrap" style="gap:6px">${topics.map(([id, label, n]) => `<button class="chip chip--square" ${pressed(S.vTopic === id)} ${attr({ action: 'v-topic', id })}>${esc(label)} <span style="opacity:.6">${n}</span></button>`).join('')}</div>
+      </div>
+      <div class="wrap" style="gap:12px;align-items:center;justify-content:flex-end">
         <div class="segmented">${hideModes.map(([id, label]) => `<button ${pressed(S.vHide === id)} ${attr({ action: 'v-hide', id })}>${label}</button>`).join('')}</div>
       </div>
       <div class="list">${rows}</div>
@@ -812,12 +826,12 @@
     'n-next': () => set({ num: genNum(S.nMode), numShown: false }),
     // Từ vựng
     'open-vocab': d => { $('#q').value = ''; set({ screen: 'vocab', vLesson: +d.id, q: '', vRevealed: {} }); window.scrollTo(0, 0); },
-    'v-lesson': d => set({ vLesson: +d.id, vType: 'all', vRevealed: {} }),
-    'v-type': d => set({ vType: d.id }),
+    'v-lesson': d => set({ vLesson: +d.id, vTopic: 'all', vRevealed: {} }),
+    'v-topic': d => set({ vTopic: d.id, vRevealed: {} }),
     'v-hide': d => set({ vHide: d.id, vRevealed: {} }),
     'v-reveal': d => set({ vRevealed: { ...S.vRevealed, [d.id]: true } }),
-    'vocab-flash': () => set({ screen: 'flash', fcDeck: 'v' + S.vLesson, fcIdx: 0, fcFlip: false }),
-    'vocab-quiz': () => { set({ screen: 'quiz', qDeck: 'v' + S.vLesson }); startQuiz(); },
+    'vocab-flash': () => set({ screen: 'flash', fcDeck: vocabDeck(), fcIdx: 0, fcFlip: false }),
+    'vocab-quiz': () => { set({ screen: 'quiz', qDeck: vocabDeck() }); startQuiz(); },
     // Ngữ pháp
     'g-lesson': d => set({ gLesson: +d.id }),
     'g-hide': () => set({ gHideVi: !S.gHideVi }),
