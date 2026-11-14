@@ -194,9 +194,18 @@
     return { kc, pct: kc / g.words.length, warn: g.words.filter(w => w.warn).length, best: S.best[g.id] != null ? S.best[g.id] + '%' : '—' };
   }
 
-  // A topic deck chosen from the vocab page gets its own chip so it shows as selected.
-  const deckChips = (cur, action) => ALL_DECKS.concat(topicOf(cur) ? [{ id: cur, label: deckTitle(cur) }] : []).map(d =>
-    `<button class="chip" ${pressed(cur === d.id)} ${attr({ action, id: d.id })}>${esc(d.label)}</button>`).join('');
+  // A topic deck ('v3:day') keeps its lesson chip ('v3') selected.
+  const deckChips = (cur, action) => ALL_DECKS.map(d =>
+    `<button class="chip" ${pressed(cur === d.id || (topicOf(cur) || {}).g === d.id)} ${attr({ action, id: d.id })}>${esc(d.label)}</button>`).join('');
+  // Second row under the deck chips: the topic groups of the chosen vocab lesson (empty for other decks).
+  function topicChips(cur, action) {
+    const tp = topicOf(cur), g = tp ? tp.g : /^v\d$/.test(cur) ? cur : null;
+    if (!g) return '';
+    const words = VOCAB.filter(v => v.g === g);
+    const opts = [[g, 'Cả bài', words.length]].concat((VOCAB_TOPICS[g.slice(1)] || []).map(([id, label]) => [g + ':' + id, label, words.filter(v => v.topic === id).length]));
+    return `<div class="stack" style="gap:8px"><span class="label">Nhóm trong bài ${g.slice(1)}</span>
+      <div class="wrap" style="gap:6px">${opts.map(([id, label, n]) => `<button class="chip chip--square" ${pressed(cur === id)} ${attr({ action, id })}>${esc(label)} <span style="opacity:.6">${n}</span></button>`).join('')}</div></div>`;
+  }
 
   function viewHome() {
     const knownTotal = WORDS.filter(w => S.known[w.id]).length;
@@ -420,7 +429,8 @@
         </div>`;
       })();
     return `<div class="stack" style="gap:20px;align-items:center">
-      <div class="chip-row">${deckChips(S.fcDeck, 'fc-deck')}</div>${body}</div>`;
+      <div class="chip-row">${deckChips(S.fcDeck, 'fc-deck')}</div>
+      ${topicOf(S.fcDeck) || /^v\d$/.test(S.fcDeck) ? `<div style="align-self:stretch">${topicChips(S.fcDeck, 'fc-deck')}</div>` : ''}${body}</div>`;
   }
 
   function viewQuiz() {
@@ -431,6 +441,7 @@
       return `<div class="stack narrow"><div class="stack" style="gap:22px">
         <div><h2 style="margin-bottom:6px;font-size:26px">Kiểm tra</h2><p style="color:var(--ink-3);font-size:15px">10 câu mỗi lượt. Bộ kanji: nhìn chữ, chọn hoặc gõ cách đọc. Bộ từ vựng: nhìn nghĩa tiếng Việt, chọn hoặc gõ từ tiếng Nhật.</p></div>
         <div class="stack" style="gap:10px"><span class="label">Bộ câu hỏi</span><div class="wrap" style="gap:6px">${deckChips(S.qDeck, 'q-deck')}</div></div>
+        ${topicChips(S.qDeck, 'q-deck')}
         <div class="stack" style="gap:10px"><span class="label">Cách trả lời</span><div class="segmented">${modes}</div></div>
         <div class="wrap" style="align-items:center;gap:16px">
           <button class="btn btn--primary btn--lg" data-action="q-start">Bắt đầu</button>
@@ -788,6 +799,11 @@
     $('#tabs').innerHTML = TABS.map(([id, label]) =>
       `<button class="tab" ${attr({ action: 'go', id })} ${S.screen === id && !qt ? 'aria-current="page"' : ''}>${label}</button>`).join('');
     $('#app').innerHTML = qt ? viewSearch(qt) : VIEWS[S.screen]();
+    // Re-rendering resets horizontal scroll, so bring the selected chip of each scrolling row back into view.
+    document.querySelectorAll('#app .chip-row').forEach(row => {
+      const on = row.querySelector('[aria-pressed="true"]');
+      if (on && row.scrollWidth > row.clientWidth) row.scrollLeft = on.offsetLeft - row.offsetLeft - (row.clientWidth - on.offsetWidth) / 2;
+    });
     const typeInput = $('#q-type');
     if (typeInput && !S.quiz.checked) typeInput.focus();
     else if (S.quiz && S.quiz.checked && S.quiz.mode === 'type') $('#q-next')?.focus();
