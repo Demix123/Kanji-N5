@@ -23,7 +23,7 @@
     screen: 'home', group: 'thu', kanji: '日', q: '', hideR: false, examOnly: false, revealed: {},
     known: saved.known || {}, best: saved.best || {},
     fcDeck: 'all', fcIdx: 0, fcFlip: false,
-    qDeck: 'all', qMode: 'choice', quiz: null,
+    qDeck: 'all', qMode: 'choice', qCount: 'all', quiz: null,
     nMode: 'price', num: genNum('price'), numShown: false,
     strokes: null,
     // Từ vựng
@@ -37,7 +37,7 @@
   };
   const strokeCache = {};
   const LESSONS = [1, 2, 3];
-  const VOCAB_DECKS = LESSONS.map(l => ({ id: 'v' + l, label: 'Từ vựng bài ' + l })).concat([{ id: 'vall', label: 'Từ vựng 1–3' }]);
+  const VOCAB_DECKS = LESSONS.map(l => ({ id: 'v' + l, label: 'Từ vựng bài ' + l })).concat([{ id: 'vall', label: 'Từ vựng 1–3' }, { id: 'vweak', label: 'Từ vựng chưa thuộc' }]);
   const ALL_DECKS = DECKS.concat(VOCAB_DECKS);
   const ALL_ITEMS = WORDS.concat(VOCAB);
   // Deck for the vocab page's current lesson and group.
@@ -84,6 +84,7 @@
     if (id === 'warn') return WORDS.filter(w => w.warn);
     if (id === 'exam') return WORDS.filter(w => w.exam);
     if (id === 'vall') return VOCAB;
+    if (id === 'vweak') return VOCAB.filter(w => !S.known[w.id]);
     const tp = topicOf(id);
     if (tp) return VOCAB.filter(w => w.g === tp.g && w.topic === tp.t);
     if (id[0] === 'v') return VOCAB.filter(w => w.g === id);
@@ -150,11 +151,25 @@
   }
 
   // ---------- Quiz ----------
-  function startQuiz() {
-    const p = pool(S.qDeck);
-    const qs = shuffle(p).slice(0, Math.min(10, p.length)).map(w => {
+  // Meaning pieces without notes in brackets: "Cơm (đĩa)" → ["cơm"], "Buổi tối, ban đêm" → ["buổi tối", "ban đêm"].
+  const meaningParts = m => (m || '').replace(/\(.*?\)/g, '').split(/[,/;]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const sameMeaning = (a, b) => { const pa = meaningParts(a.m); return meaningParts(b.m).some(x => pa.includes(x)); };
+  // Accepted typed answers: "（お）ちゃ" → おちゃ / ちゃ, "〜ようび" → ようび.
+  const typedAnswers = r => {
+    const base = r.replace(/[〜～]/g, '');
+    const m = base.match(/^[（(](.+?)[）)](.*)$/);
+    return m ? [m[1] + m[2], m[2]] : [base];
+  };
+
+  // only: replay just these words (e.g. the ones answered wrong).
+  function startQuiz(only) {
+    const p = only || pool(S.qDeck);
+    if (!p.length) return set({ quiz: null, qEmpty: true });
+    const n = only || S.qCount === 'all' ? p.length : Math.min(+S.qCount, p.length);
+    const qs = shuffle(p).slice(0, n).map(w => {
       const src = w.kind === 'vocab' ? VOCAB : WORDS;
-      const same = src.filter(x => x.g === w.g && x.r !== w.r);
+      // Vocab prompts are meanings, so skip options that mean the same thing (ごはん vs ライス, よる vs ばん).
+      const same = src.filter(x => x.g === w.g && x.r !== w.r && !(w.kind === 'vocab' && sameMeaning(w, x)));
       const opts = [w.r];
       if (w.wrong && w.wrong !== w.r) opts.push(w.wrong);
       // Vocab: wrong options come from the same topic first (verbs vs verbs), then the rest of the lesson.
@@ -162,7 +177,7 @@
       [...near, ...shuffle(same)].forEach(x => { if (opts.length < 4 && !opts.includes(x.r)) opts.push(x.r); });
       return { w, opts: shuffle(opts) };
     });
-    set({ quiz: { deck: S.qDeck, mode: S.qMode, qs, i: 0, checked: false, picked: null, typed: '', ok: false, wrong: [], score: 0, done: false } });
+    set({ qEmpty: false, quiz: { deck: S.qDeck, retry: !!only, mode: S.qMode, qs, i: 0, checked: false, picked: null, typed: '', ok: false, wrong: [], score: 0, done: false } });
   }
   function answer(val, ok) {
     const z = S.quiz; if (!z || z.checked) return;
@@ -175,11 +190,17 @@
   function submitTyped() {
     const z = S.quiz; if (!z || z.checked) return;
     const t = clean(z.typed); if (!t) return;
-    answer(t, same(t, z.qs[z.i].w.r));
+    const w = z.qs[z.i].w;
+    // A vocab prompt is a meaning, so any word of the lesson with that meaning counts (Cơm: ごはん or ライス).
+    const ok = (w.kind === 'vocab' ? VOCAB.filter(x => x === w || (x.g === w.g && sameMeaning(w, x))) : [w])
+      .some(x => typedAnswers(x.r).some(r => same(t, r)));
+    answer(t, ok);
   }
   function nextQ() {
     const z = S.quiz;
     if (z.i + 1 >= z.qs.length) {
+      // A retry of wrong answers is not a full round, so it doesn't count toward the best score.
+      if (z.retry) return set({ quiz: { ...z, done: true } });
       const pct = Math.round(z.score / z.qs.length * 100);
       const best = { ...S.best, [z.deck]: Math.max(S.best[z.deck] || 0, pct) };
       set({ best, quiz: { ...z, done: true } }, { persist: true });
@@ -438,11 +459,16 @@
     if (!z) {
       const modes = [['choice', 'Chọn đáp án'], ['type', 'Gõ hiragana']].map(([id, label]) =>
         `<button ${pressed(S.qMode === id)} ${attr({ action: 'q-mode', id })}>${label}</button>`).join('');
+      const total = pool(S.qDeck).length;
+      const counts = [['all', `Tất cả (${total})`]].concat([10, 20].filter(n => n < total).map(n => [String(n), n + ' câu ngẫu nhiên']))
+        .map(([id, label]) => `<button ${pressed(String(S.qCount) === id || (id === 'all' && +S.qCount >= total))} ${attr({ action: 'q-count', id })}>${label}</button>`).join('');
       return `<div class="stack narrow"><div class="stack" style="gap:22px">
-        <div><h2 style="margin-bottom:6px;font-size:26px">Kiểm tra</h2><p style="color:var(--ink-3);font-size:15px">10 câu mỗi lượt. Bộ kanji: nhìn chữ, chọn hoặc gõ cách đọc. Bộ từ vựng: nhìn nghĩa tiếng Việt, chọn hoặc gõ từ tiếng Nhật.</p></div>
+        <div><h2 style="margin-bottom:6px;font-size:26px">Kiểm tra</h2><p style="color:var(--ink-3);font-size:15px">Bộ kanji: nhìn chữ, chọn hoặc gõ cách đọc. Bộ từ vựng: nhìn nghĩa tiếng Việt, chọn hoặc gõ từ tiếng Nhật.</p></div>
         <div class="stack" style="gap:10px"><span class="label">Bộ câu hỏi</span><div class="wrap" style="gap:6px">${deckChips(S.qDeck, 'q-deck')}</div></div>
         ${topicChips(S.qDeck, 'q-deck')}
+        <div class="stack" style="gap:10px"><span class="label">Số câu</span><div class="segmented">${counts}</div></div>
         <div class="stack" style="gap:10px"><span class="label">Cách trả lời</span><div class="segmented">${modes}</div></div>
+        ${S.qEmpty || !total ? `<p style="color:var(--warn);font-size:14px;margin:0">Bộ này không còn từ nào để kiểm tra (có thể bạn đã thuộc hết). Chọn bộ khác nhé.</p>` : ''}
         <div class="wrap" style="align-items:center;gap:16px">
           <button class="btn btn--primary btn--lg" data-action="q-start">Bắt đầu</button>
           <span class="muted" style="font-size:14px">Điểm cao nhất bộ này: ${S.best[S.qDeck] != null ? S.best[S.qDeck] + '%' : 'chưa có'}</span>
@@ -452,10 +478,11 @@
     if (z.done) {
       const pct = z.score / z.qs.length;
       const verdict = pct >= 0.9 ? 'Rất tốt! Sẵn sàng cho bài thi.' : pct >= 0.6 ? 'Khá ổn. Ôn lại mấy từ dưới đây.' : 'Cần ôn thêm. Thử học lại nhóm này trước.';
+      // Vocab words are kana only (w === r), so show the meaning instead of the word twice.
       const wrong = z.wrong.map(w => `<div class="word-row" style="gap:6px 18px;padding:12px 18px">
         <span class="kj" lang="ja" style="font-weight:700;font-size:22px;min-width:110px">${esc(w.w)}</span>
-        <span class="jp" lang="ja" style="font-weight:500;font-size:17px;flex:1">${esc(w.r)}</span>
-        <span style="font-size:13px;color:var(--warn)">${esc(w.note)}</span></div>`).join('');
+        <span class="${w.w === w.r ? '' : 'jp'}" lang="${w.w === w.r ? 'vi' : 'ja'}" style="font-weight:500;font-size:17px;flex:1">${esc(w.w === w.r ? w.m : w.r)}</span>
+        ${w.note && w.kind !== 'vocab' ? `<span style="font-size:13px;color:var(--warn)">${esc(w.note)}</span>` : ''}</div>`).join('');
       return `<div class="stack narrow">
         <div class="card stack" style="border-radius:var(--r-xl);padding:32px;align-items:center;gap:6px;text-align:center">
           <span class="muted" style="font-size:14px">Kết quả</span>
@@ -464,7 +491,8 @@
         </div>
         ${z.wrong.length ? `<div class="stack" style="gap:8px"><span class="label">Cần ôn lại</span><div class="list">${wrong}</div></div>` : ''}
         <div class="wrap" style="gap:10px">
-          <button class="btn btn--primary" data-action="q-start">Làm lượt mới</button>
+          ${z.wrong.length ? `<button class="btn btn--primary" data-action="q-retry">Làm lại ${z.wrong.length} câu sai</button>` : ''}
+          <button class="btn ${z.wrong.length ? '' : 'btn--primary'}" data-action="q-start">Làm lượt mới</button>
           <button class="btn" data-action="q-quit">Chọn bộ khác</button>
         </div>
       </div>`;
@@ -830,9 +858,11 @@
     'fc-prev': () => fcMove(-1),
     'fc-no': () => fcMark(false),
     'fc-yes': () => fcMark(true),
-    'q-deck': d => set({ qDeck: d.id }),
+    'q-deck': d => set({ qDeck: d.id, qEmpty: false }),
     'q-mode': d => set({ qMode: d.id }),
     'q-start': () => startQuiz(),
+    'q-retry': () => startQuiz(S.quiz.wrong),
+    'q-count': d => set({ qCount: d.id }),
     'q-quit': () => set({ quiz: null }),
     'q-pick': d => answer(d.text, d.text === S.quiz.qs[S.quiz.i].w.r),
     'q-submit': () => submitTyped(),
