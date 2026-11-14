@@ -180,10 +180,11 @@ const VOCAB_RAW = {
 
 const VOCAB_TYPES = { n: 'Danh từ', v: 'Động từ', a: 'Tính từ', x: 'Khác' };
 // Parsed list. Each item works like a kanji word (w, r, m, g, id) so flashcards and the quiz can use it.
+// Vocab is studied by its kana only: w = kana. kj is kept so a search for 日本 still finds にほん.
 const VOCAB = [];
 Object.entries(VOCAB_RAW).forEach(([lesson, raw]) => {
   raw.trim().split('\n').forEach((line, i) => {
     const [kana, kanji = '', m = '', t = 'x', note = ''] = line.split('|');
-    VOCAB.push({ id: `v${lesson}-${i}`, g: `v${lesson}`, lesson: +lesson, kind: 'vocab', r: kana, kj: kanji, w: kanji || kana, m, t, note, warn: false, exam: false });
+    VOCAB.push({ id: `v${lesson}-${i}`, g: `v${lesson}`, lesson: +lesson, kind: 'vocab', r: kana, kj: kanji, w: kana, m, t, note, warn: false, exam: false });
   });
 });

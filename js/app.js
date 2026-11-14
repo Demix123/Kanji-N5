@@ -467,7 +467,7 @@
     const feedback = z.checked ? `<div class="feedback ${z.ok ? 'is-ok' : 'is-bad'}" role="status">
         <div class="stack" style="flex:1 1 240px;gap:4px">
           <span style="font-size:16px;font-weight:700">${esc(fbTitle)}</span>
-          <span style="font-size:15px"><span class="kj" lang="ja">${esc(w.w)}</span> = <span class="jp" lang="ja" style="font-weight:700">${esc(w.r)}</span></span>
+          <span style="font-size:15px">${w.w === w.r ? '' : `<span class="kj" lang="ja">${esc(w.w)}</span> = `}<span class="jp" lang="ja" style="font-weight:700">${esc(w.r)}</span>${w.kind === 'vocab' ? ` = ${esc(w.m)}` : ''}</span>
           <span style="font-size:13px">${esc(w.note)}</span>
         </div>
         <div style="display:flex;gap:8px">
@@ -540,8 +540,7 @@
       const reveal = `<button class="reveal" ${attr({ action: 'v-reveal', id: v.id })}>Chạm để xem</button>`;
       return `<div class="word-row">
         <div class="stack" style="flex:1 1 200px;gap:2px;min-width:0">
-          ${hideJp ? reveal : `<span class="jp" lang="ja" style="font-weight:700;font-size:21px">${esc(v.r)}</span>
-          ${v.kj ? `<span class="kj" lang="ja" style="font-size:15px;color:var(--muted)">${esc(v.kj)}</span>` : ''}`}
+          ${hideJp ? reveal : `<span class="jp" lang="ja" style="font-weight:700;font-size:21px">${esc(v.r)}</span>`}
         </div>
         <div class="stack" style="flex:2 1 200px;gap:2px;min-width:0">
           ${hideVi ? reveal : `<span style="font-size:15px">${esc(v.m)}</span>`}
@@ -751,7 +750,6 @@
     const vocab = VOCAB.filter(v => toHira(v.r).includes(htq) || (v.kj && v.kj.includes(qt)) || norm(v.m).includes(nq)).slice(0, 30);
     const vHtml = vocab.map(v => `<button class="word-row word-row--link" ${attr({ action: 'open-vocab', id: v.lesson })}>
       <span class="jp" lang="ja" style="font-weight:700;font-size:20px;min-width:140px">${esc(v.r)}</span>
-      <span class="kj" lang="ja" style="font-size:17px;min-width:100px;color:var(--muted)">${esc(v.kj)}</span>
       <span style="flex:1;font-size:14px;color:var(--ink-3)">${esc(v.m)}</span>
       <span class="muted" style="font-size:12px">Từ vựng bài ${v.lesson} →</span>
     </button>`).join('');
