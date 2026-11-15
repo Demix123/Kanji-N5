@@ -247,3 +247,11 @@ main { max-width: 1120px; margin: 0 auto; padding: 28px 20px 80px; }
 .qa-list li + li { border-top: 1px solid var(--line-soft); }
 .qa-list li.is-focus { background: var(--accent-soft); }
 .answer { display: flex; gap: 10px; align-items: flex-start; margin-left: 34px; padding: 10px 12px; border-radius: var(--r-md); background: var(--success-soft); color: var(--success-ink); }
+
+/* Grammar examples as question → answer pairs */
+.g-qa { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 14px; background: var(--surface-sunk); border: 1px solid var(--line-soft); }
+.g-line { display: flex; gap: 10px; align-items: flex-start; }
+.g-tag { flex: none; min-width: 40px; height: 24px; margin-top: 8px; padding: 0 8px; border-radius: 12px; font-size: 12px; font-weight: 700; display: inline-grid; place-items: center; }
+.g-line.is-q .g-tag { background: var(--deep); color: var(--deep-text); }
+.g-line.is-a .g-tag { background: var(--success); color: #fff; }
+.g-line .reveal { margin-top: 4px; }

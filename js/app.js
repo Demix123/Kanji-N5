@@ -29,7 +29,7 @@
     // Từ vựng
     vLesson: 1, vTopic: 'all', vHide: 'none', vRevealed: {},
     // Ngữ pháp
-    gLesson: 1, gHideVi: false,
+    gLesson: 1, gHideVi: false, gHideA: false, gShown: {},
     // Speaking
     spMode: 'passage', psg: 1, furi: true, breaks: false, showVi: false,
     qaKind: 'person', qaSet: 'p1', qaShow: {}, qaAll: false, qaFocus: -1,
@@ -635,12 +635,20 @@
       </div>
       <p class="g-mean">${esc(g.m)}</p>
       ${g.n ? `<p class="note-box" style="font-size:14px">${esc(g.n)}</p>` : ''}
-      <ul class="g-ex">${g.ex.map(([jp, vi]) => `<li>
-        <button class="btn btn--icon" title="Nghe" aria-label="Nghe ví dụ" ${attr({ action: 'speak', text: jp })}>▶</button>
-        <span class="stack" style="gap:2px;min-width:0">
-          <span class="jp" lang="ja" style="font-size:17px">${esc(jp)}</span>
-          ${S.gHideVi ? '' : `<span class="muted" style="font-size:14px">${esc(vi)}</span>`}
-        </span></li>`).join('')}</ul>
+      <ul class="g-ex">${g.ex.map(([q, qv, a, av], j) => {
+        const key = `${S.gLesson}-${i}-${j}`;
+        const hidden = S.gHideA && !S.gShown[key];
+        const line = (tag, jp, vi, cls) => `<div class="g-line ${cls}">
+          <span class="g-tag">${tag}</span>
+          <button class="btn btn--icon" title="Nghe" aria-label="Nghe câu ${tag.toLowerCase()}" ${attr({ action: 'speak', text: jp })}>▶</button>
+          <span class="stack" style="gap:2px;min-width:0">
+            <span class="jp" lang="ja" style="font-size:17px">${esc(jp)}</span>
+            ${S.gHideVi ? '' : `<span class="muted" style="font-size:14px">${esc(vi)}</span>`}
+          </span></div>`;
+        return `<li class="g-qa">${line('Hỏi', q, qv, 'is-q')}${hidden
+          ? `<div class="g-line is-a"><span class="g-tag">Đáp</span><button class="reveal" ${attr({ action: 'g-show', id: key })}>Tự trả lời rồi chạm để xem</button></div>`
+          : line('Đáp', a, av, 'is-a')}</li>`;
+      }).join('')}</ul>
     </article>`).join('');
     return `<div class="stack" style="gap:20px;max-width:860px">
       <div class="wrap" style="gap:16px;align-items:flex-end;justify-content:space-between">
@@ -648,7 +656,10 @@
           <h2 style="font-size:clamp(24px,3vw,32px)">Ngữ pháp bài ${S.gLesson}</h2>
           <span class="muted" style="font-size:14px">${pts.length} mẫu câu · theo file tóm tắt ngữ pháp</span>
         </div>
-        <button class="chip chip--square" ${pressed(S.gHideVi)} data-action="g-hide">Ẩn nghĩa ví dụ (tự dịch)</button>
+        <div class="wrap" style="gap:6px">
+          <button class="chip chip--square" ${pressed(S.gHideA)} data-action="g-hide-a">Ẩn câu trả lời (tự luyện)</button>
+          <button class="chip chip--square" ${pressed(S.gHideVi)} data-action="g-hide">Ẩn nghĩa tiếng Việt</button>
+        </div>
       </div>
       <div class="chip-row">${lessonChips(S.gLesson, 'g-lesson')}</div>
       <div class="stack" style="gap:14px">${cards}</div>
@@ -881,6 +892,8 @@
     // Ngữ pháp
     'g-lesson': d => set({ gLesson: +d.id }),
     'g-hide': () => set({ gHideVi: !S.gHideVi }),
+    'g-hide-a': () => set({ gHideA: !S.gHideA, gShown: {} }),
+    'g-show': d => set({ gShown: { ...S.gShown, [d.id]: true } }),
     // Speaking
     'sp-mode': d => { clearRec(); set({ spMode: d.id }); },
     'psg': d => { clearRec(); set({ psg: +d.id }); },
